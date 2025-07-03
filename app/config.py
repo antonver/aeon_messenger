@@ -23,9 +23,6 @@ class Settings(BaseSettings):
     upload_dir: str = os.getenv("UPLOAD_DIR", "uploads")
     max_file_size: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))  # 50MB
     
-    # CORS settings
-    cors_origins: List[str] = []
-    
     # App settings
     app_name: str = "Aeon Messenger"
     debug: bool = os.getenv("DEBUG", "False").lower() == "true"
