@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 import os
 
 
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     max_file_size: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))  # 50MB
     
     # CORS settings
-    cors_origins: list = os.getenv("CORS_ORIGINS", "*").split(",")
+    cors_origins: List[str] = []
     
     # App settings
     app_name: str = "Aeon Messenger"
@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # Heroku settings
     port: int = int(os.getenv("PORT", "8000"))
     host: str = os.getenv("HOST", "0.0.0.0")
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Обрабатываем CORS_ORIGINS отдельно
+        cors_env = os.getenv("CORS_ORIGINS", "*")
+        if cors_env == "*":
+            self.cors_origins = ["*"]
+        else:
+            self.cors_origins = [origin.strip() for origin in cors_env.split(",")]
     
     class Config:
         env_file = ".env"
