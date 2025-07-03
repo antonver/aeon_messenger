@@ -36,9 +36,9 @@ class Settings(BaseSettings):
         # Обрабатываем CORS_ORIGINS отдельно
         cors_env = os.getenv("CORS_ORIGINS", "*")
         if cors_env == "*":
-            self.cors_origins = ["*"]
+            object.__setattr__(self, 'cors_origins', ["*"])
         else:
-            self.cors_origins = [origin.strip() for origin in cors_env.split(",")]
+            object.__setattr__(self, 'cors_origins', [origin.strip() for origin in cors_env.split(",")])
     
     class Config:
         env_file = ".env"
