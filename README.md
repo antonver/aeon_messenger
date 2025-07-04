@@ -154,7 +154,32 @@ fetch('/api/v1/me', {
 ```
 ### ENV
 
-```Create .env file
+```
+# Database settings
+DATABASE_URL=postgresql://user:password@localhost:5432/aeon_messenger
+
+# Telegram settings
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_WEBHOOK_SECRET=your_webhook_secret
+
+# JWT settings
+SECRET_KEY=your-super-secret-key-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Redis settings
+REDIS_URL=redis://localhost:6379
+
+# File upload settings
+UPLOAD_DIR=uploads
+MAX_FILE_SIZE=52428800
+
+# CORS settings
+CORS_ORIGINS=["*"]
+
+# App settings
+APP_NAME=Aeon Messenger
+DEBUG=true 
 ```
 ### WebSocket подключение
 
