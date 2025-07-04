@@ -64,12 +64,8 @@ async def startup_event():
     logger.info(f"Режим отладки: {settings.debug}")
     logger.info(f"Токен бота установлен: {'Да' if settings.telegram_bot_token != 'test_token' else 'НЕТ - ИСПОЛЬЗУЕТСЯ ТЕСТОВЫЙ!'}")
     
-    user.Base.metadata.create_all(bind=engine)
-    chat.Base.metadata.create_all(bind=engine)
-    message.Base.metadata.create_all(bind=engine)
-    
-    # Создаем таблицу приглашений если её нет
-    from app.database import engine, Base
+    # Создаем все таблицы
+    from app.database import Base
     Base.metadata.create_all(bind=engine)
     
     logger.info("Таблицы базы данных созданы")
