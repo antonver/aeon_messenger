@@ -14,6 +14,7 @@ from app.api import chats, messages
 from app.websocket import router as websocket_router
 from app.auth.dependencies import get_current_user
 from app.models.user import User
+from app.models.chat_invitation import ChatInvitation
 
 # Настройка логирования
 logging.basicConfig(
@@ -66,6 +67,10 @@ async def startup_event():
     user.Base.metadata.create_all(bind=engine)
     chat.Base.metadata.create_all(bind=engine)
     message.Base.metadata.create_all(bind=engine)
+    
+    # Создаем таблицу приглашений если её нет
+    from app.database import engine, Base
+    Base.metadata.create_all(bind=engine)
     
     logger.info("Таблицы базы данных созданы")
 
