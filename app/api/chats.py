@@ -5,9 +5,10 @@ from app.database import get_db
 from app.models.user import User
 from app.models.chat import Chat, chat_members
 from app.models.message import Message
-from app.schemas.chat import ChatCreate, ChatUpdate, Chat as ChatSchema, ChatList, UserInChat
+from app.schemas.chat import ChatCreate, ChatUpdate, Chat as ChatSchema, ChatList, UserInChat, InviteByUsernameRequest
 from app.auth.dependencies import get_current_user
 from sqlalchemy import and_, desc
+from app.models.chat_invitation import ChatInvitation
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -348,4 +349,84 @@ async def remove_member_from_chat(
     
     db.commit()
     
-    return {"message": "Участник успешно удален"} 
+    return {"message": "Участник успешно удален"}
+
+
+@router.post("/{chat_id}/invite-by-username")
+async def invite_member_by_username(
+    chat_id: int,
+    request: InviteByUsernameRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Приглашение участника в чат по username
+    """
+    # Проверяем, что пользователь является администратором чата
+    is_admin = db.query(chat_members).filter(
+        and_(
+            chat_members.c.user_id == current_user.id,
+            chat_members.c.chat_id == chat_id,
+            chat_members.c.is_admin == True
+        )
+    ).first()
+    
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    
+    # Убираем @ если есть
+    clean_username = request.username.lstrip('@')
+    
+    # Ищем пользователя по username
+    user = db.query(User).filter(User.username == clean_username).first()
+    
+    if user:
+        # Пользователь найден, добавляем сразу
+        # Проверяем, что пользователь еще не является участником
+        existing_member = db.query(chat_members).filter(
+            and_(
+                chat_members.c.user_id == user.id,
+                chat_members.c.chat_id == chat_id
+            )
+        ).first()
+        
+        if existing_member:
+            raise HTTPException(status_code=400, detail="Пользователь уже является участником чата")
+        
+        # Добавляем пользователя в чат
+        db.execute(
+            chat_members.insert().values(
+                user_id=user.id,
+                chat_id=chat_id,
+                is_admin=False
+            )
+        )
+        db.commit()
+        
+        return {"message": f"Пользователь @{clean_username} добавлен в чат", "status": "added"}
+    else:
+        # Пользователь не найден, создаем приглашение
+        # Сначала создаем таблицу приглашений если её нет
+        
+        # Проверяем, нет ли уже приглашения для этого username
+        existing_invitation = db.query(ChatInvitation).filter(
+            and_(
+                ChatInvitation.username == clean_username,
+                ChatInvitation.chat_id == chat_id,
+                ChatInvitation.is_active == True
+            )
+        ).first()
+        
+        if existing_invitation:
+            raise HTTPException(status_code=400, detail="Приглашение уже отправлено")
+        
+        # Создаем приглашение
+        invitation = ChatInvitation(
+            chat_id=chat_id,
+            username=clean_username,
+            invited_by=current_user.id
+        )
+        db.add(invitation)
+        db.commit()
+        
+        return {"message": f"Приглашение отправлено @{clean_username}. Пользователь будет добавлен при входе в приложение", "status": "invited"} 

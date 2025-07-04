@@ -56,4 +56,8 @@ class ChatList(BaseModel):
     unread_count: int = 0
     
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+
+class InviteByUsernameRequest(BaseModel):
+    username: str 
