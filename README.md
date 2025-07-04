@@ -152,7 +152,10 @@ fetch('/api/v1/me', {
   }
 })
 ```
+### ENV
 
+```Create .env file
+```
 ### WebSocket подключение
 
 ```javascript
