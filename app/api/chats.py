@@ -105,7 +105,7 @@ async def get_user_chats(
             and_(
                 Message.chat_id == chat.id,
                 Message.is_deleted == False,
-                ~Message.read_by.contains([current_user.id])
+                ~Message.read_by.op('?')(str(current_user.id))
             )
         ).count()
         
