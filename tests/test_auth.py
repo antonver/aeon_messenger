@@ -15,6 +15,8 @@ class TestTelegramAuth:
     
     def test_validate_telegram_data_success(self, mock_telegram_bot_token):
         """Тест успешной валидации данных Telegram"""
+        import time
+        
         user_data = {
             'id': 123456789,
             'username': 'testuser',
@@ -24,9 +26,10 @@ class TestTelegramAuth:
             'is_premium': False
         }
         
+        current_time = int(time.time())
         data = {
             'user': json.dumps(user_data, separators=(',', ':')),  # Без пробелов
-            'auth_date': '1640995200',
+            'auth_date': str(current_time),
             'query_id': 'test_query_id'
         }
         
@@ -58,11 +61,13 @@ class TestTelegramAuth:
         assert result is not None
         assert result['user']['id'] == 123456789
         assert result['user']['username'] == 'testuser'
-        assert result['auth_date'] == 1640995200
+        assert result['auth_date'] == current_time
         assert result['query_id'] == 'test_query_id'
     
     def test_validate_telegram_data_invalid_signature(self, mock_telegram_bot_token):
         """Тест валидации с неверной подписью"""
+        import time
+        
         user_data = {
             'id': 123456789,
             'username': 'testuser',
@@ -71,7 +76,7 @@ class TestTelegramAuth:
         
         data = {
             'user': json.dumps(user_data, separators=(',', ':')),
-            'auth_date': '1640995200',
+            'auth_date': str(int(time.time())),
             'hash': 'invalid_signature'
         }
         
@@ -84,6 +89,8 @@ class TestTelegramAuth:
     
     def test_validate_telegram_data_no_hash(self, mock_telegram_bot_token):
         """Тест валидации без подписи"""
+        import time
+        
         user_data = {
             'id': 123456789,
             'username': 'testuser',
@@ -92,7 +99,7 @@ class TestTelegramAuth:
         
         data = {
             'user': json.dumps(user_data, separators=(',', ':')),
-            'auth_date': '1640995200'
+            'auth_date': str(int(time.time()))
         }
         
         init_data = '&'.join([f"{k}={quote_plus(v)}" for k, v in data.items()])

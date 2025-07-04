@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 import os
+import logging
 
 from app.config import settings
 from app.database import get_db, engine
@@ -12,6 +14,18 @@ from app.api import chats, messages
 from app.websocket import router as websocket_router
 from app.auth.dependencies import get_current_user
 from app.models.user import User
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log') if not settings.debug else logging.NullHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.app_name,
@@ -24,7 +38,7 @@ app = FastAPI(
 # Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=getattr(settings, 'cors_origins', ["*"]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,9 +59,15 @@ app.include_router(websocket_router.router)
 @app.on_event("startup")
 async def startup_event():
     """Создаем таблицы при запуске приложения"""
+    logger.info("Запуск приложения")
+    logger.info(f"Режим отладки: {settings.debug}")
+    logger.info(f"Токен бота установлен: {'Да' if settings.telegram_bot_token != 'test_token' else 'НЕТ - ИСПОЛЬЗУЕТСЯ ТЕСТОВЫЙ!'}")
+    
     user.Base.metadata.create_all(bind=engine)
     chat.Base.metadata.create_all(bind=engine)
     message.Base.metadata.create_all(bind=engine)
+    
+    logger.info("Таблицы базы данных созданы")
 
 
 @app.get("/")
@@ -88,7 +108,7 @@ async def health_check(db: Session = Depends(get_db)):
     """
     try:
         # Проверяем подключение к базе данных
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db_status = "connected"
     except Exception as e:
         db_status = f"error: {str(e)}"
@@ -100,11 +120,44 @@ async def health_check(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/v1/debug/auth")
+async def debug_auth_config():
+    """
+    Отладочная информация о настройках авторизации
+    """
+    return {
+        "telegram_bot_token_set": settings.telegram_bot_token != "test_token",
+        "telegram_bot_token_length": len(settings.telegram_bot_token) if settings.telegram_bot_token else 0,
+        "debug_mode": settings.debug,
+        "cors_origins": getattr(settings, 'cors_origins', ["*"]),
+        "app_name": settings.app_name
+    }
+
+
+@app.post("/api/v1/debug/validate-telegram-data")
+async def debug_validate_telegram_data(init_data: str):
+    """
+    Отладочная конечная точка для валидации Telegram данных
+    """
+    from app.auth.telegram import validate_telegram_data
+    
+    logger.info(f"Отладка валидации для: {init_data[:50]}...")
+    
+    result = validate_telegram_data(init_data)
+    
+    return {
+        "success": result is not None,
+        "validated_data": result,
+        "telegram_bot_token_set": settings.telegram_bot_token != "test_token"
+    }
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """
     Обработчик HTTP исключений
     """
+    logger.error(f"HTTP Exception: {exc.status_code} - {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -119,6 +172,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     """
     Обработчик общих исключений
     """
+    logger.error(f"General Exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={

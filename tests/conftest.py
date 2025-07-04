@@ -109,6 +109,8 @@ def sample_user_data():
 @pytest.fixture
 def sample_telegram_init_data():
     """Примерные данные Telegram Mini App"""
+    import time
+    
     return {
         'user': {
             'id': 123456789,
@@ -118,7 +120,7 @@ def sample_telegram_init_data():
             'language_code': 'en',
             'is_premium': False
         },
-        'auth_date': 1640995200,
+        'auth_date': int(time.time()),
         'query_id': 'test_query_id'
     }
 
@@ -201,6 +203,7 @@ def auth_headers(mock_telegram_bot_token):
     import json
     import hmac
     import hashlib
+    import time
     from urllib.parse import quote_plus
     
     user_data = {
@@ -212,9 +215,12 @@ def auth_headers(mock_telegram_bot_token):
         'is_premium': False
     }
     
+    # Используем актуальное время
+    current_time = int(time.time())
+    
     data = {
         'user': json.dumps(user_data, separators=(',', ':')),
-        'auth_date': '1640995200',
+        'auth_date': str(current_time),
         'query_id': 'test_query_id'
     }
     

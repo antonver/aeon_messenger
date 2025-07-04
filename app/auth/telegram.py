@@ -1,16 +1,28 @@
 import hashlib
 import hmac
 import json
+import time
 from urllib.parse import unquote_plus
 from typing import Optional, Dict, Any
+import logging
 from app.config import settings
 
+# Настраиваем логгер
+logger = logging.getLogger(__name__)
 
 def validate_telegram_data(init_data: str) -> Optional[Dict[str, Any]]:
     """
     Валидация данных от Telegram Mini App
     """
     try:
+        logger.info("Начинаю валидацию Telegram данных")
+        logger.debug(f"Полученный init_data: {init_data}")
+        
+        # Проверяем, что токен бота установлен правильно (для тестов разрешаем test_bot_token)
+        if not settings.telegram_bot_token or (settings.telegram_bot_token == "test_token"):
+            logger.error("Токен Telegram бота не установлен или использует значение по умолчанию!")
+            return None
+        
         # Парсим query string
         data_dict = {}
         for item in init_data.split('&'):
@@ -18,13 +30,24 @@ def validate_telegram_data(init_data: str) -> Optional[Dict[str, Any]]:
                 key, value = item.split('=', 1)
                 data_dict[key] = unquote_plus(value)
         
+        logger.debug(f"Распарсенные данные: {data_dict}")
+        
         # Извлекаем hash для проверки
         received_hash = data_dict.pop('hash', None)
         if not received_hash:
+            logger.error("Отсутствует hash в данных")
+            return None
+        
+        # Проверяем срок действия данных (не старше 24 часов)
+        auth_date = int(data_dict.get('auth_date', 0))
+        current_time = int(time.time())
+        if current_time - auth_date > 86400:  # 24 часа
+            logger.error(f"Данные слишком старые: auth_date={auth_date}, current_time={current_time}")
             return None
         
         # Создаем строку для проверки подписи
         data_check_string = '\n'.join([f"{k}={v}" for k, v in sorted(data_dict.items())])
+        logger.debug(f"Строка для проверки подписи: {data_check_string}")
         
         # Создаем секретный ключ
         secret_key = hmac.new(
@@ -40,21 +63,26 @@ def validate_telegram_data(init_data: str) -> Optional[Dict[str, Any]]:
             hashlib.sha256
         ).hexdigest()
         
+        logger.debug(f"Ожидаемый hash: {calculated_hash}")
+        logger.debug(f"Полученный hash: {received_hash}")
+        
         if calculated_hash != received_hash:
+            logger.error("Подпись не совпадает!")
             return None
         
         # Парсим данные пользователя
         user_data = json.loads(data_dict.get('user', '{}'))
+        logger.info(f"Успешная валидация для пользователя: {user_data.get('id')}")
         
         return {
             'user': user_data,
-            'auth_date': int(data_dict.get('auth_date', 0)),
+            'auth_date': auth_date,
             'query_id': data_dict.get('query_id'),
             'start_param': data_dict.get('start_param')
         }
         
     except Exception as e:
-        print(f"Ошибка валидации Telegram данных: {e}")
+        logger.error(f"Ошибка валидации Telegram данных: {e}", exc_info=True)
         return None
 
 
