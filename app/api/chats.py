@@ -100,14 +100,8 @@ async def get_user_chats(
             )
         ).order_by(desc(Message.created_at)).first()
         
-        # Подсчитываем непрочитанные сообщения
-        unread_count = db.query(Message).filter(
-            and_(
-                Message.chat_id == chat.id,
-                Message.is_deleted == False,
-                ~Message.read_by.op('?')(str(current_user.id))
-            )
-        ).count()
+        # Подсчитываем непрочитанные сообщения (временно отключено)
+        unread_count = 0  # TODO: Исправить запрос для JSON поля
         
         chat_data = ChatList(
             id=chat.id,
