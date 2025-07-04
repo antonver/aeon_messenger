@@ -22,6 +22,56 @@ def validate_telegram_data(init_data: str) -> Optional[Dict[str, Any]]:
         if not settings.telegram_bot_token or (settings.telegram_bot_token == "test_token"):
             logger.error("Токен Telegram бота не установлен или использует значение по умолчанию!")
             return None
+            
+        # ВРЕМЕННЫЙ РЕЖИМ ОТЛАДКИ - принимаем любые данные если debug включен
+        if settings.debug:
+            logger.warning("🔧 РЕЖИМ ОТЛАДКИ: Упрощенная валидация данных")
+            try:
+                # Парсим query string
+                data_dict = {}
+                for item in init_data.split('&'):
+                    if '=' in item:
+                        key, value = item.split('=', 1)
+                        data_dict[key] = unquote_plus(value)
+                
+                # Если есть данные пользователя - используем их
+                if 'user' in data_dict:
+                    user_data = json.loads(data_dict.get('user', '{}'))
+                    logger.info(f"🔧 DEBUG: Принимаем данные пользователя: {user_data.get('id')}")
+                    return {
+                        'user': user_data,
+                        'auth_date': int(data_dict.get('auth_date', int(time.time()))),
+                        'query_id': data_dict.get('query_id', 'debug_query'),
+                        'start_param': data_dict.get('start_param')
+                    }
+                else:
+                    # Создаем тестовые данные для отладки
+                    logger.warning("🔧 DEBUG: Создаем тестовые данные пользователя")
+                    return {
+                        'user': {
+                            'id': 391667619,
+                            'first_name': 'Debug',
+                            'last_name': 'User',
+                            'username': 'debug_user'
+                        },
+                        'auth_date': int(time.time()),
+                        'query_id': 'debug_query',
+                        'start_param': None
+                    }
+            except Exception as e:
+                logger.error(f"Ошибка в режиме отладки: {e}")
+                # Возвращаем базовые тестовые данные
+                return {
+                    'user': {
+                        'id': 391667619,
+                        'first_name': 'Debug',
+                        'last_name': 'User',
+                        'username': 'debug_user'
+                    },
+                    'auth_date': int(time.time()),
+                    'query_id': 'debug_query',
+                    'start_param': None
+                }
         
         # Парсим query string
         data_dict = {}
