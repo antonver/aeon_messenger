@@ -24,62 +24,71 @@ async def get_current_user(
     
     logger.debug(f"Получен заголовок x-telegram-init-data: {x_telegram_init_data[:50]}...")
     
-    # Валидируем данные от Telegram
-    validated_data = validate_telegram_data(x_telegram_init_data)
-    if not validated_data:
-        logger.error("Валидация Telegram данных не прошла")
-        raise HTTPException(status_code=401, detail="Недействительные данные авторизации")
+    try:
+        # Валидируем данные от Telegram
+        validated_data = validate_telegram_data(x_telegram_init_data)
+        if not validated_data:
+            logger.error("Валидация Telegram данных не прошла")
+            raise HTTPException(status_code=401, detail="Недействительные данные авторизации")
+        
+        logger.info("Валидация Telegram данных успешна")
+        
+        # Извлекаем информацию о пользователе
+        user_info = extract_user_info(validated_data)
+        telegram_id = user_info.get('telegram_id')
+        
+        if not telegram_id:
+            logger.error("Отсутствует telegram_id в данных пользователя")
+            raise HTTPException(status_code=401, detail="Отсутствует ID пользователя")
+        
+        logger.info(f"Поиск пользователя с telegram_id: {telegram_id}")
+        
+        # Ищем пользователя в базе данных
+        user = db.query(User).filter(User.telegram_id == telegram_id).first()
+        
+        if not user:
+            logger.info(f"Создание нового пользователя с telegram_id: {telegram_id}")
+            # Создаем нового пользователя
+            user = User(
+                telegram_id=telegram_id,
+                username=user_info.get('username'),
+                first_name=user_info.get('first_name'),
+                last_name=user_info.get('last_name'),
+                language_code=user_info.get('language_code', 'en'),
+                is_premium=user_info.get('is_premium', False),
+                profile_photo_url=user_info.get('profile_photo_url')
+            )
+            db.add(user)
+            try:
+                db.commit()
+                db.refresh(user)
+                logger.info(f"Новый пользователь создан успешно: {user.id}")
+            except Exception as e:
+                logger.error(f"Ошибка при создании пользователя: {e}")
+                db.rollback()
+                raise HTTPException(status_code=500, detail="Ошибка при создании пользователя")
+        else:
+            logger.info(f"Обновление данных существующего пользователя: {user.id}")
+            # Обновляем данные существующего пользователя
+            user.username = user_info.get('username') or user.username
+            user.first_name = user_info.get('first_name') or user.first_name
+            user.last_name = user_info.get('last_name') or user.last_name
+            user.language_code = user_info.get('language_code', 'en')
+            user.is_premium = user_info.get('is_premium', False)
+            user.profile_photo_url = user_info.get('profile_photo_url') or user.profile_photo_url
+            try:
+                db.commit()
+                logger.info(f"Данные пользователя обновлены успешно: {user.id}")
+            except Exception as e:
+                logger.error(f"Ошибка при обновлении пользователя: {e}")
+                db.rollback()
+        
+        return user
     
-    logger.info("Валидация Telegram данных успешна")
-    
-    # Извлекаем информацию о пользователе
-    user_info = extract_user_info(validated_data)
-    telegram_id = user_info.get('telegram_id')
-    
-    if not telegram_id:
-        logger.error("Отсутствует telegram_id в данных пользователя")
-        raise HTTPException(status_code=401, detail="Отсутствует ID пользователя")
-    
-    logger.info(f"Поиск пользователя с telegram_id: {telegram_id}")
-    
-    # Ищем пользователя в базе данных
-    user = db.query(User).filter(User.telegram_id == telegram_id).first()
-    
-    if not user:
-        logger.info(f"Создание нового пользователя с telegram_id: {telegram_id}")
-        # Создаем нового пользователя
-        user = User(
-            telegram_id=telegram_id,
-            username=user_info.get('username'),
-            first_name=user_info.get('first_name'),
-            last_name=user_info.get('last_name'),
-            language_code=user_info.get('language_code', 'en'),
-            is_premium=user_info.get('is_premium', False),
-            profile_photo_url=user_info.get('profile_photo_url')
-        )
-        db.add(user)
-        try:
-            db.commit()
-            db.refresh(user)
-            logger.info(f"Новый пользователь создан успешно: {user.id}")
-        except Exception as e:
-            logger.error(f"Ошибка при создании пользователя: {e}")
-            db.rollback()
-            raise HTTPException(status_code=500, detail="Ошибка при создании пользователя")
-    else:
-        logger.info(f"Обновление данных существующего пользователя: {user.id}")
-        # Обновляем данные существующего пользователя
-        user.username = user_info.get('username') or user.username
-        user.first_name = user_info.get('first_name') or user.first_name
-        user.last_name = user_info.get('last_name') or user.last_name
-        user.language_code = user_info.get('language_code', 'en')
-        user.is_premium = user_info.get('is_premium', False)
-        user.profile_photo_url = user_info.get('profile_photo_url') or user.profile_photo_url
-        try:
-            db.commit()
-            logger.info(f"Данные пользователя обновлены успешно: {user.id}")
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении пользователя: {e}")
-            db.rollback()
-    
-    return user 
+    except HTTPException:
+        # Перепроброс HTTP исключений как есть
+        raise
+    except Exception as e:
+        # Перехват всех других исключений и преобразование в 401
+        logger.error(f"Неожиданная ошибка при авторизации: {e}", exc_info=True)
+        raise HTTPException(status_code=401, detail="Ошибка авторизации") 
