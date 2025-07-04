@@ -18,9 +18,14 @@ def validate_telegram_data(init_data: str) -> Optional[Dict[str, Any]]:
         logger.info("Начинаю валидацию Telegram данных")
         logger.debug(f"Полученный init_data: {init_data}")
         
-        # Проверяем, что токен бота установлен правильно (для тестов разрешаем test_bot_token)
-        if not settings.telegram_bot_token or (settings.telegram_bot_token == "test_token"):
-            logger.error("Токен Telegram бота не установлен или использует значение по умолчанию!")
+        # Проверяем, что токен бота установлен правильно
+        if not settings.telegram_bot_token:
+            logger.error("Токен Telegram бота не установлен!")
+            return None
+            
+        # В режиме отладки разрешаем test_token
+        if settings.telegram_bot_token == "test_token" and not settings.debug:
+            logger.error("Токен Telegram бота использует значение по умолчанию в продакшн режиме!")
             return None
             
         # ВРЕМЕННЫЙ РЕЖИМ ОТЛАДКИ - принимаем любые данные если debug включен
