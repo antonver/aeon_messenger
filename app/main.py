@@ -10,7 +10,7 @@ import logging
 from app.config import settings
 from app.database import get_db, engine
 from app.models import user, chat, message
-from app.api import chats, messages
+from app.api import chats, messages, admin, hr
 from app.websocket import router as websocket_router
 from app.auth.dependencies import get_current_user
 from app.models.user import User
@@ -54,6 +54,8 @@ app.mount("/media", StaticFiles(directory=settings.upload_dir), name="media")
 # Подключаем роуты
 app.include_router(chats.router, prefix="/api/v1")
 app.include_router(messages.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
+app.include_router(hr.router, prefix="/api/v1")
 app.include_router(websocket_router.router)
 
 

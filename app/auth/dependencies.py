@@ -83,6 +83,21 @@ async def get_current_user(
                 logger.error(f"Ошибка при обновлении пользователя: {e}")
                 db.rollback()
         
+        # Проверяем, есть ли администраторы в системе
+        admin_exists = db.query(User).filter(User.is_admin == True).first()
+        if not admin_exists:
+            logger.info(f"В системе ещё нет администраторов. Назначаем пользователя {user.id} (telegram_id: {telegram_id}) первым администратором.")
+            user.is_admin = True
+            try:
+                db.commit()
+                db.refresh(user)
+                logger.info(f"Пользователь {user.id} успешно назначен первым администратором системы")
+            except Exception as e:
+                logger.error(f"Ошибка при назначении администратора: {e}")
+                db.rollback()
+        else:
+            logger.debug(f"В системе уже есть администраторы. Пользователь {user.id} остается обычным пользователем")
+        
         return user
     
     except HTTPException:
