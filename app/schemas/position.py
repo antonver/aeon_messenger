@@ -26,7 +26,13 @@ class Position(PositionBase):
     class Config:
         from_attributes = True
 
-class PositionWithQualities(Position):
+class PositionWithQualities(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    is_active: bool = True
+    created_at: datetime
+    updated_at: Optional[datetime] = None
     qualities: List["Quality"] = []
     
     class Config:
