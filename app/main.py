@@ -98,6 +98,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         "last_name": current_user.last_name,
         "language_code": current_user.language_code,
         "is_premium": current_user.is_premium,
+        "is_admin": current_user.is_admin,
         "profile_photo_url": current_user.profile_photo_url,
         "bio": current_user.bio,
         "created_at": current_user.created_at
