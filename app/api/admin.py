@@ -86,18 +86,36 @@ async def create_position(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Создать новую позицию"""
-    db_position = Position(**position.dict())
+    # Извлекаем quality_ids из данных позиции
+    quality_ids = position.quality_ids or []
+    position_data = position.dict(exclude={'quality_ids'})
+    
+    # Создаем позицию
+    db_position = Position(**position_data)
     db.add(db_position)
     db.commit()
     db.refresh(db_position)
+    
+    # Добавляем качества к позиции
+    for quality_id in quality_ids:
+        quality = db.query(Quality).filter(Quality.id == quality_id).first()
+        if quality:
+            position_quality = PositionQuality(
+                position_id=db_position.id,
+                quality_id=quality_id,
+                weight=1
+            )
+            db.add(position_quality)
+    
+    db.commit()
     return db_position
 
-@router.get("/positions", response_model=List[PositionSchema])
+@router.get("/positions", response_model=List[PositionWithQualities])
 async def get_positions(
     db: Session = Depends(get_db),
     current_user: User = Depends(check_admin_permissions)
 ):
-    """Получить все позиции"""
+    """Получить все позиции с качествами"""
     positions = db.query(Position).all()
     return positions
 

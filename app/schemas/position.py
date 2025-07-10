@@ -11,7 +11,7 @@ class PositionBase(BaseModel):
     is_active: bool = True
 
 class PositionCreate(PositionBase):
-    pass
+    quality_ids: Optional[List[int]] = []
 
 class PositionUpdate(BaseModel):
     title: Optional[str] = None
