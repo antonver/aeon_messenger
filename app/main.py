@@ -36,13 +36,32 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Middleware для логирования CORS запросов
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"CORS Request: {request.method} {request.url}")
+    logger.info(f"Origin: {request.headers.get('origin', 'No origin')}")
+    logger.info(f"User-Agent: {request.headers.get('user-agent', 'No user-agent')}")
+    
+    response = await call_next(request)
+    
+    # Добавляем CORS заголовки вручную если нужно
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    logger.info(f"CORS Response: {response.status_code}")
+    return response
+
 # Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=getattr(settings, 'cors_origins', ["*"]),
+    allow_origins=["*"],  # Разрешаем все источники
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Создаем директорию для медиа файлов
@@ -82,6 +101,29 @@ async def root():
         "message": "Aeon Messenger API",
         "version": "1.0.0",
         "status": "active"
+    }
+
+
+@app.get("/api/v1/test-cors")
+async def test_cors():
+    """
+    Тестовый эндпоинт для проверки CORS
+    """
+    return {
+        "message": "CORS test endpoint",
+        "status": "success",
+        "cors_enabled": True
+    }
+
+
+@app.options("/api/v1/test-cors")
+async def test_cors_options():
+    """
+    OPTIONS эндпоинт для CORS preflight запросов
+    """
+    return {
+        "message": "CORS preflight response",
+        "status": "success"
     }
 
 

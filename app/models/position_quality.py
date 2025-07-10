@@ -1,14 +1,6 @@
-from sqlalchemy import Column, Integer, ForeignKey, Table
+from sqlalchemy import Column, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
-
-# Промежуточная таблица для связи позиций и качеств
-position_quality = Table(
-    'position_quality',
-    Base.metadata,
-    Column('position_id', Integer, ForeignKey('positions.id'), primary_key=True),
-    Column('quality_id', Integer, ForeignKey('qualities.id'), primary_key=True)
-)
 
 class PositionQuality(Base):
     __tablename__ = "position_qualities"

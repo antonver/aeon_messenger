@@ -4,7 +4,7 @@ from .message import Message
 from .chat_invitation import ChatInvitation
 from .position import Position
 from .quality import Quality
-from .position_quality import PositionQuality, position_quality
+from .position_quality import PositionQuality
 from .interview import Interview
 
 __all__ = [
@@ -16,6 +16,5 @@ __all__ = [
     "Position",
     "Quality", 
     "PositionQuality",
-    "position_quality",
     "Interview"
 ] 

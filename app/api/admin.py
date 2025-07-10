@@ -86,29 +86,43 @@ async def create_position(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Создать новую позицию"""
-    # Извлекаем quality_ids из данных позиции
-    quality_ids = position.quality_ids or []
-    position_data = position.dict(exclude={'quality_ids'})
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Создаем позицию
-    db_position = Position(**position_data)
-    db.add(db_position)
-    db.commit()
-    db.refresh(db_position)
-    
-    # Добавляем качества к позиции
-    for quality_id in quality_ids:
-        quality = db.query(Quality).filter(Quality.id == quality_id).first()
-        if quality:
-            position_quality = PositionQuality(
-                position_id=db_position.id,
-                quality_id=quality_id,
-                weight=1
-            )
-            db.add(position_quality)
-    
-    db.commit()
-    return db_position
+    try:
+        # Извлекаем quality_ids из данных позиции
+        quality_ids = position.quality_ids or []
+        position_data = position.dict(exclude={'quality_ids'})
+        
+        logger.info(f"Создание позиции: {position_data}")
+        
+        # Создаем позицию
+        db_position = Position(**position_data)
+        db.add(db_position)
+        db.commit()
+        db.refresh(db_position)
+        
+        logger.info(f"Позиция создана с ID: {db_position.id}")
+        
+        # Временно отключаем добавление качеств из-за ошибки в модели
+        # TODO: Исправить модель PositionQuality
+        # for quality_id in quality_ids:
+        #     quality = db.query(Quality).filter(Quality.id == quality_id).first()
+        #     if quality:
+        #         position_quality = PositionQuality(
+        #             position_id=db_position.id,
+        #             quality_id=quality_id,
+        #             weight=1
+        #         )
+        #         db.add(position_quality)
+        # 
+        # db.commit()
+        return db_position
+        
+    except Exception as e:
+        logger.error(f"Ошибка при создании позиции: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Ошибка при создании позиции: {str(e)}")
 
 @router.get("/positions", response_model=List[PositionWithQualities])
 async def get_positions(
@@ -160,11 +174,25 @@ async def create_quality(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Создать новое качество"""
-    db_quality = Quality(**quality.dict())
-    db.add(db_quality)
-    db.commit()
-    db.refresh(db_quality)
-    return db_quality
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        quality_data = quality.dict()
+        logger.info(f"Создание качества: {quality_data}")
+        
+        db_quality = Quality(**quality_data)
+        db.add(db_quality)
+        db.commit()
+        db.refresh(db_quality)
+        
+        logger.info(f"Качество создано с ID: {db_quality.id}")
+        return db_quality
+        
+    except Exception as e:
+        logger.error(f"Ошибка при создании качества: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Ошибка при создании качества: {str(e)}")
 
 @router.get("/qualities", response_model=List[QualitySchema])
 async def get_qualities(
