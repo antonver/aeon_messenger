@@ -5,7 +5,11 @@ from typing import List
 import logging
 from app.database import get_db
 from app.auth.dependencies import get_current_user
-from app.models import User, Position, Quality, PositionQuality, Interview
+from app.models.user import User
+from app.models.position import Position
+from app.models.quality import Quality
+from app.models.position_quality import PositionQuality
+from app.models.interview import Interview
 from app.schemas.position import Position as PositionSchema
 from app.schemas.interview import InterviewCreate, Interview as InterviewSchema, InterviewUpdate
 import random
@@ -22,6 +26,19 @@ async def get_active_positions(
     try:
         positions = db.query(Position).filter(Position.is_active == True).all()
         logger.info(f"Получено {len(positions)} активных позиций")
+        return positions
+    except Exception as e:
+        logger.error(f"Ошибка при получении позиций: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении позиций")
+
+@router.get("/positions/public", response_model=List[PositionSchema])
+async def get_active_positions_public(
+    db: Session = Depends(get_db)
+):
+    """Получить активные позиции для интервью (публичный доступ)"""
+    try:
+        positions = db.query(Position).filter(Position.is_active == True).all()
+        logger.info(f"Получено {len(positions)} активных позиций (публичный доступ)")
         return positions
     except Exception as e:
         logger.error(f"Ошибка при получении позиций: {e}")
@@ -176,7 +193,7 @@ async def complete_interview(
             raise HTTPException(status_code=400, detail="Интервью уже завершено")
 
         # Рассчитываем балл
-        score = calculate_interview_score(interview)
+        score = calculate_interview_score(interview, db)
         interview.score = score
         interview.status = "completed"
 
@@ -197,107 +214,232 @@ async def complete_interview(
         raise HTTPException(status_code=500, detail="Ошибка при завершении интервью")
 
 def generate_questions_for_position(position: Position, db: Session) -> List[dict]:
-    """Генерирует 10 вопросов на основе качеств позиции"""
+    """Генерирует 10 вопросов на основе качеств позиции с помощью OpenAI"""
     try:
-        questions = []
+        import os
+        import openai
+        from typing import List
 
         # Получаем качества позиции
         position_qualities = db.query(Quality).join(
             PositionQuality, Quality.id == PositionQuality.quality_id
         ).filter(PositionQuality.position_id == position.id).all()
 
-        # Базовые вопросы для каждой позиции
-        base_questions = [
-            {
-                "id": 1,
-                "text": f"Почему вы заинтересованы в позиции {position.title}?",
-                "type": "text",
-                "category": "motivation"
-            },
-            {
-                "id": 2,
-                "text": "Расскажите о своем профессиональном опыте",
-                "type": "text",
-                "category": "experience"
-            },
-            {
-                "id": 3,
-                "text": "Какие ваши сильные стороны?",
-                "type": "text",
-                "category": "strengths"
-            },
-            {
-                "id": 4,
-                "text": "Как вы работаете в команде?",
-                "type": "text",
-                "category": "teamwork"
-            },
-            {
-                "id": 5,
-                "text": "Опишите сложную рабочую ситуацию и как вы ее решили",
-                "type": "text",
-                "category": "problem_solving"
-            }
-        ]
+        # Проверяем наличие OpenAI API ключа
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            logger.warning("OPENAI_API_KEY не найден, используем базовые вопросы")
+            return generate_basic_questions(position)
 
-        questions.extend(base_questions)
+        # Настраиваем OpenAI клиент
+        openai.api_key = openai_api_key
 
-        # Добавляем вопросы на основе качеств позиции
-        quality_questions = []
-        for quality in position_qualities:
-            quality_questions.append({
-                "id": len(questions) + 1,
-                "text": f"Как вы оцениваете свои навыки в области: {quality.name}?",
-                "type": "scale",
-                "category": quality.name.lower(),
-                "scale": {"min": 1, "max": 10}
-            })
+        # Формируем промпт для генерации вопросов
+        qualities_text = ", ".join([q.name for q in position_qualities]) if position_qualities else "общие профессиональные навыки"
+        
+        prompt = f"""
+        Создай 10 профессиональных вопросов для интервью на позицию "{position.title}".
+        
+        Ключевые качества для оценки: {qualities_text}
+        
+        Требования к вопросам:
+        1. Вопросы должны быть направлены на оценку указанных качеств
+        2. Вопросы должны быть открытыми и требовать развернутых ответов
+        3. Вопросы должны быть профессиональными и уместными для данной позиции
+        4. Вопросы должны быть разнообразными по типам (поведенческие, ситуационные, технические)
+        5. Вопросы должны быть на русском языке
+        
+        Формат ответа - только список вопросов, каждый с новой строки, без нумерации.
+        """
 
-        # Добавляем вопросы по качествам (максимум 5)
-        if quality_questions:
-            questions.extend(quality_questions[:5])
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Ты HR-специалист, который создает профессиональные вопросы для интервью."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.7
+            )
 
-        # Дополняем до 10 вопросов если нужно
-        additional_questions = [
-            {
-                "id": len(questions) + 1,
-                "text": "Какие у вас планы профессионального развития?",
-                "type": "text",
-                "category": "career_goals"
-            },
-            {
-                "id": len(questions) + 1,
-                "text": "Что вы знаете о нашей компании?",
-                "type": "text",
-                "category": "company_knowledge"
-            }
-        ]
+            # Получаем сгенерированные вопросы
+            generated_questions_text = response.choices[0].message.content.strip()
+            questions_list = [q.strip() for q in generated_questions_text.split('\n') if q.strip()]
 
-        while len(questions) < 10 and additional_questions:
-            questions.append(additional_questions.pop(0))
+            # Формируем структурированные вопросы
+            questions = []
+            for i, question_text in enumerate(questions_list[:10], 1):
+                questions.append({
+                    "id": i,
+                    "text": question_text,
+                    "type": "text",
+                    "category": "ai_generated"
+                })
 
-        return questions[:10]  # Ограничиваем 10 вопросами
+            # Если получили меньше 10 вопросов, дополняем базовыми
+            if len(questions) < 10:
+                basic_questions = generate_basic_questions(position)
+                for basic_q in basic_questions:
+                    if len(questions) >= 10:
+                        break
+                    questions.append({
+                        "id": len(questions) + 1,
+                        "text": basic_q["text"],
+                        "type": basic_q["type"],
+                        "category": basic_q["category"]
+                    })
+
+            logger.info(f"Сгенерировано {len(questions)} вопросов для позиции {position.title}")
+            return questions
+
+        except Exception as openai_error:
+            logger.error(f"Ошибка при обращении к OpenAI: {openai_error}")
+            return generate_basic_questions(position)
 
     except Exception as e:
         logger.error(f"Ошибка при генерации вопросов: {e}")
-        # Возвращаем базовые вопросы в случае ошибки
-        return [
-            {
-                "id": 1,
-                "text": f"Почему вы заинтересованы в позиции {position.title}?",
-                "type": "text",
-                "category": "motivation"
-            },
-            {
-                "id": 2,
-                "text": "Расскажите о своем опыте работы",
-                "type": "text",
-                "category": "experience"
-            }
-        ]
+        return generate_basic_questions(position)
 
-def calculate_interview_score(interview: Interview) -> int:
-    """Рассчитывает балл за интервью"""
+def generate_basic_questions(position: Position) -> List[dict]:
+    """Генерирует базовые вопросы для позиции"""
+    return [
+        {
+            "id": 1,
+            "text": f"Почему вы заинтересованы в позиции {position.title}?",
+            "type": "text",
+            "category": "motivation"
+        },
+        {
+            "id": 2,
+            "text": "Расскажите о своем профессиональном опыте",
+            "type": "text",
+            "category": "experience"
+        },
+        {
+            "id": 3,
+            "text": "Какие ваши сильные стороны?",
+            "type": "text",
+            "category": "strengths"
+        },
+        {
+            "id": 4,
+            "text": "Как вы работаете в команде?",
+            "type": "text",
+            "category": "teamwork"
+        },
+        {
+            "id": 5,
+            "text": "Опишите сложную рабочую ситуацию и как вы ее решили",
+            "type": "text",
+            "category": "problem_solving"
+        },
+        {
+            "id": 6,
+            "text": "Какие у вас планы профессионального развития?",
+            "type": "text",
+            "category": "career_goals"
+        },
+        {
+            "id": 7,
+            "text": "Что вы знаете о нашей компании?",
+            "type": "text",
+            "category": "company_knowledge"
+        },
+        {
+            "id": 8,
+            "text": "Как вы справляетесь со стрессовыми ситуациями?",
+            "type": "text",
+            "category": "stress_management"
+        },
+        {
+            "id": 9,
+            "text": "Расскажите о проекте, которым вы гордитесь",
+            "type": "text",
+            "category": "achievements"
+        },
+        {
+            "id": 10,
+            "text": "Как вы планируете свое время и приоритеты?",
+            "type": "text",
+            "category": "time_management"
+        }
+    ]
+
+def calculate_interview_score(interview: Interview, db: Session) -> int:
+    """Рассчитывает балл за интервью с помощью OpenAI анализа"""
+    try:
+        if not interview.answers:
+            return 0
+
+        import os
+        import openai
+
+        # Проверяем наличие OpenAI API ключа
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            logger.warning("OPENAI_API_KEY не найден, используем базовый расчет")
+            return calculate_basic_score(interview)
+
+        # Настраиваем OpenAI клиент
+        openai.api_key = openai_api_key
+
+        # Получаем позицию для контекста
+        position = db.query(Position).filter(Position.id == interview.position_id).first()
+        position_title = position.title if position else "неизвестная позиция"
+
+        # Формируем промпт для анализа
+        answers_text = "\n".join([f"Вопрос {i+1}: {interview.questions[i]['text']}\nОтвет: {answer}" 
+                                 for i, answer in enumerate(interview.answers.values())])
+
+        prompt = f"""
+        Проанализируй ответы кандидата на интервью для позиции "{position_title}".
+        
+        Ответы кандидата:
+        {answers_text}
+        
+        Оцени кандидата по следующим критериям:
+        1. Качество и полнота ответов (0-25 баллов)
+        2. Соответствие требованиям позиции (0-25 баллов)
+        3. Профессиональный опыт и компетенции (0-25 баллов)
+        4. Мотивация и заинтересованность (0-25 баллов)
+        
+        Верни только число от 0 до 100 - общий балл кандидата.
+        """
+
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Ты HR-специалист, который оценивает кандидатов на основе их ответов на интервью."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50,
+                temperature=0.3
+            )
+
+            # Получаем оценку
+            score_text = response.choices[0].message.content.strip()
+            try:
+                score = int(score_text)
+                # Ограничиваем балл от 0 до 100
+                score = max(0, min(100, score))
+                logger.info(f"AI оценка для интервью {interview.id}: {score}")
+                return score
+            except ValueError:
+                logger.warning(f"Не удалось распарсить AI оценку: {score_text}, используем базовый расчет")
+                return calculate_basic_score(interview)
+
+        except Exception as openai_error:
+            logger.error(f"Ошибка при обращении к OpenAI: {openai_error}")
+            return calculate_basic_score(interview)
+
+    except Exception as e:
+        logger.error(f"Ошибка при расчете балла интервью: {e}")
+        return calculate_basic_score(interview)
+
+def calculate_basic_score(interview: Interview) -> int:
+    """Базовый расчет балла за интервью"""
     try:
         if not interview.answers:
             return 0
@@ -308,7 +450,7 @@ def calculate_interview_score(interview: Interview) -> int:
         # Базовый балл за количество отвеченных вопросов
         completion_score = (answered_questions / total_questions) * 50
 
-        # Дополнительные баллы за качество ответов (упрощенная логика)
+        # Дополнительные баллы за качество ответов
         quality_score = 0
         for answer in interview.answers.values():
             if isinstance(answer, str) and len(answer.strip()) > 10:
@@ -320,5 +462,5 @@ def calculate_interview_score(interview: Interview) -> int:
         return total_score
 
     except Exception as e:
-        logger.error(f"Ошибка при расчете балла интервью: {e}")
+        logger.error(f"Ошибка при базовом расчете балла: {e}")
         return 0
