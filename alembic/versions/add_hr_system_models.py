@@ -42,15 +42,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_positions_id'), 'positions', ['id'], unique=False)
     op.create_index(op.f('ix_positions_title'), 'positions', ['title'], unique=False)
     
-    # Создаем промежуточную таблицу position_quality
-    op.create_table('position_quality',
-        sa.Column('position_id', sa.Integer(), nullable=False),
-        sa.Column('quality_id', sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(['position_id'], ['positions.id'], ),
-        sa.ForeignKeyConstraint(['quality_id'], ['qualities.id'], ),
-        sa.PrimaryKeyConstraint('position_id', 'quality_id')
-    )
-    
     # Создаем таблицу position_qualities
     op.create_table('position_qualities',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -90,7 +81,6 @@ def downgrade() -> None:
     op.drop_table('interviews')
     op.drop_index(op.f('ix_position_qualities_id'), table_name='position_qualities')
     op.drop_table('position_qualities')
-    op.drop_table('position_quality')
     op.drop_index(op.f('ix_positions_title'), table_name='positions')
     op.drop_index(op.f('ix_positions_id'), table_name='positions')
     op.drop_table('positions')
