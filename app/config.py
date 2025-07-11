@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     port: int = int(os.getenv("PORT", "8000"))
     host: str = os.getenv("HOST", "0.0.0.0")
     
-    # CORS settings
+    # CORS settings - обрабатываем как простую строку
     cors_origins: List[str] = []
 
     def __init__(self, **kwargs):
@@ -41,20 +41,40 @@ class Settings(BaseSettings):
         if self.database_url.startswith("postgres://"):
             object.__setattr__(self, 'database_url', self.database_url.replace("postgres://", "postgresql://", 1))
 
-        # Обрабатываем CORS_ORIGINS
-        cors_env = os.getenv("CORS_ORIGINS", "https://qit-antonvers-projects.vercel.app,https://aeon-messenger.vercel.app")
-        if cors_env == "*":
-            object.__setattr__(self, 'cors_origins', ["*"])
-        else:
-            origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
-            # Добавляем локальные домены для разработки
-            origins.extend([
+        # Безопасная обработка CORS_ORIGINS
+        cors_env = os.getenv("CORS_ORIGINS", "")
+        if not cors_env or cors_env.strip() == "":
+            # Дефолтные значения если переменная не установлена
+            origins = [
+                "https://qit-antonvers-projects.vercel.app",
+                "https://aeon-messenger.vercel.app",
                 "http://localhost:3000",
                 "http://localhost:5173",
                 "http://127.0.0.1:3000",
                 "http://127.0.0.1:5173"
-    ])
-            object.__setattr__(self, 'cors_origins', origins)
+            ]
+        elif cors_env == "*":
+            origins = ["*"]
+        else:
+            # Парсим строку, разделенную запятыми
+            origins = []
+            for origin in cors_env.split(","):
+                cleaned_origin = origin.strip()
+                if cleaned_origin and cleaned_origin != "":
+                    origins.append(cleaned_origin)
+
+            # Добавляем локальные домены для разработки если их нет
+            local_origins = [
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173"
+            ]
+            for local_origin in local_origins:
+                if local_origin not in origins:
+                    origins.append(local_origin)
+
+        object.__setattr__(self, 'cors_origins', origins)
 
     class Config:
         env_file = ".env"
