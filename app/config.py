@@ -5,7 +5,7 @@ import os
 
 class Settings(BaseSettings):
     # Database settings
-    database_url: str = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/aeon_messenger")
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./aeon_messenger.db")
     
     # Telegram settings
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "test_token")

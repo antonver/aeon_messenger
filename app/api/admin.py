@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import exc
 from typing import List
 import logging
@@ -143,20 +143,23 @@ async def get_positions(
 ):
     """Получить все позиции с качествами"""
     try:
-        positions = db.query(Position).all()
+        # Используем joinedload для загрузки связанных качеств
+        positions = db.query(Position).options(
+            joinedload(Position.qualities).joinedload(PositionQuality.quality)
+        ).all()
 
-        # Для каждой позиции загружаем связанные качества
+        logger.info(f"Found {len(positions)} positions")
+        
         result = []
         for position in positions:
-            position_qualities = db.query(PositionQuality).filter(
-                PositionQuality.position_id == position.id
-            ).all()
-
+            # Извлекаем качества из связанных PositionQuality
             qualities = []
-            for pq in position_qualities:
-                quality = db.query(Quality).filter(Quality.id == pq.quality_id).first()
-                if quality:
-                    qualities.append(quality)
+            for pq in position.qualities:
+                if pq.quality:
+                    qualities.append(pq.quality)
+                    logger.info(f"Position {position.id} ({position.title}) has quality: {pq.quality.name}")
+
+            logger.info(f"Position {position.id} ({position.title}) has {len(qualities)} qualities")
 
             # Создаем объект позиции с качествами
             position_with_qualities = PositionWithQualities(
@@ -170,6 +173,7 @@ async def get_positions(
             )
             result.append(position_with_qualities)
 
+        logger.info(f"Returning {len(result)} positions with qualities")
         return result
     except Exception as e:
         logger.error(f"Ошибка при получении позиций: {e}")
@@ -183,20 +187,21 @@ async def get_position(
 ):
     """Получить позицию по ID с качествами"""
     try:
-        position = db.query(Position).filter(Position.id == position_id).first()
+        position = db.query(Position).options(
+            joinedload(Position.qualities).joinedload(PositionQuality.quality)
+        ).filter(Position.id == position_id).first()
+        
         if not position:
             raise HTTPException(status_code=404, detail="Позиция не найдена")
 
-        # Загружаем связанные качества
-        position_qualities = db.query(PositionQuality).filter(
-            PositionQuality.position_id == position.id
-        ).all()
-
+        # Извлекаем качества из связанных PositionQuality
         qualities = []
-        for pq in position_qualities:
-            quality = db.query(Quality).filter(Quality.id == pq.quality_id).first()
-            if quality:
-                qualities.append(quality)
+        for pq in position.qualities:
+            if pq.quality:
+                qualities.append(pq.quality)
+                logger.info(f"Position {position.id} ({position.title}) has quality: {pq.quality.name}")
+
+        logger.info(f"Position {position.id} ({position.title}) has {len(qualities)} qualities")
 
         return PositionWithQualities(
             id=position.id,

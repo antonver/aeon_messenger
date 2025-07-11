@@ -17,6 +17,7 @@ class PositionUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
+    quality_ids: Optional[List[int]] = None
 
 class Position(PositionBase):
     id: int
