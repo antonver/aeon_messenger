@@ -78,10 +78,14 @@ async def create_position(
     """Создать новую позицию"""
     try:
         logger.info(f"Создание позиции: {position.dict()}")
+        logger.info(f"Текущий пользователь: {current_user.id} ({current_user.username})")
 
         # Извлекаем quality_ids из данных позиции
         quality_ids = getattr(position, 'quality_ids', []) or []
         position_data = position.dict(exclude={'quality_ids'})
+        
+        logger.info(f"Данные позиции: {position_data}")
+        logger.info(f"ID качеств: {quality_ids}")
         
         # Создаем позицию
         db_position = Position(**position_data)
@@ -92,9 +96,11 @@ async def create_position(
         
         # Добавляем качества к позиции
         for quality_id in quality_ids:
+            logger.info(f"Добавляем качество {quality_id} к позиции {db_position.id}")
             # Проверяем, что качество существует
             quality = db.query(Quality).filter(Quality.id == quality_id).first()
             if quality:
+                logger.info(f"Качество {quality_id} найдено: {quality.name}")
                 # Проверяем, что связь еще не существует
                 existing = db.query(PositionQuality).filter(
                     PositionQuality.position_id == db_position.id,
@@ -108,9 +114,15 @@ async def create_position(
                         weight=1
                     )
                     db.add(position_quality)
+                    logger.info(f"Связь позиция-качество создана")
+                else:
+                    logger.info(f"Связь позиция-качество уже существует")
+            else:
+                logger.warning(f"Качество с ID {quality_id} не найдено")
 
         db.commit()
         db.refresh(db_position)
+        logger.info(f"Позиция успешно создана и сохранена")
         return db_position
         
     except exc.IntegrityError as e:
@@ -120,6 +132,8 @@ async def create_position(
     except Exception as e:
         db.rollback()
         logger.error(f"Ошибка при создании позиции: {e}")
+        logger.error(f"Тип ошибки: {type(e)}")
+        logger.error(f"Детали ошибки: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при создании позиции: {str(e)}")
 
 @router.get("/positions", response_model=List[PositionWithQualities])
@@ -280,6 +294,7 @@ async def create_quality(
     try:
         quality_data = quality.dict()
         logger.info(f"Создание качества: {quality_data}")
+        logger.info(f"Текущий пользователь: {current_user.id} ({current_user.username})")
         
         db_quality = Quality(**quality_data)
         db.add(db_quality)
@@ -296,6 +311,8 @@ async def create_quality(
     except Exception as e:
         db.rollback()
         logger.error(f"Ошибка при создании качества: {e}")
+        logger.error(f"Тип ошибки: {type(e)}")
+        logger.error(f"Детали ошибки: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при создании качества: {str(e)}")
 
 @router.get("/qualities", response_model=List[QualitySchema])
