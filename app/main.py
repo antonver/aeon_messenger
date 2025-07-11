@@ -62,7 +62,7 @@ app.add_middleware(
     allow_origins=["*"],  # Временно разрешаем все
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=["*"],
+    allow_headers=["*", "x-telegram-init-data"],
     expose_headers=["*"]
 )
 
@@ -75,7 +75,7 @@ def add_cors_headers(response, origin=None):
 
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, X-CSRF-Token"
+    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, X-CSRF-Token, x-telegram-init-data"
     response.headers["Access-Control-Expose-Headers"] = "*"
     response.headers["Access-Control-Max-Age"] = "86400"
     return response
