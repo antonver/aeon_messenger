@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         # Исправляем URL базы данных для Heroku (postgres:// -> postgresql://)
         if self.database_url.startswith("postgres://"):
             object.__setattr__(self, 'database_url', self.database_url.replace("postgres://", "postgresql://", 1))
-
+                            
         # Безопасная обработка CORS_ORIGINS
         cors_env = os.getenv("CORS_ORIGINS", "")
         if not cors_env or cors_env.strip() == "":
@@ -78,6 +78,10 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # Отключаем автоматический парсинг для cors_origins
+        fields = {
+            "cors_origins": {"env": "CORS_ORIGINS", "parse_env_var": False}
+        }
 
 
 settings = Settings()
