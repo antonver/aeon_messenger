@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
 import logging
+import traceback
 
 from app.config import settings
 from app.database import get_db, engine
@@ -36,33 +37,94 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Middleware для логирования CORS запросов
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logger.info(f"CORS Request: {request.method} {request.url}")
-    logger.info(f"Origin: {request.headers.get('origin', 'No origin')}")
-    logger.info(f"User-Agent: {request.headers.get('user-agent', 'No user-agent')}")
-    
-    response = await call_next(request)
-    
-    # Добавляем CORS заголовки вручную если нужно
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    
-    logger.info(f"CORS Response: {response.status_code}")
-    return response
+# ВАЖНО: Более агрессивные настройки CORS для исправления проблем
+ALLOWED_ORIGINS = [
+    "https://qit-antonvers-projects.vercel.app",
+    "https://aeon-messenger.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "*"  # Временно разрешаем все источники для отладки
+]
 
-# Настройка CORS
+# Добавляем домены из переменной окружения
+cors_origins_env = os.getenv("CORS_ORIGINS")
+if cors_origins_env:
+    env_origins = [origin.strip() for origin in cors_origins_env.split(",")]
+    ALLOWED_ORIGINS.extend(env_origins)
+
+logger.info(f"🌐 CORS Origins: {ALLOWED_ORIGINS}")
+
+# Настройка CORS с максимальной совместимостью
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем все источники
+    allow_origins=["*"],  # Временно разрешаем все
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+def add_cors_headers(response, origin=None):
+    """Добавляет CORS заголовки к ответу"""
+    if origin and origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, X-CSRF-Token"
+    response.headers["Access-Control-Expose-Headers"] = "*"
+    response.headers["Access-Control-Max-Age"] = "86400"
+    return response
+
+@app.middleware("http")
+async def cors_and_error_handler(request: Request, call_next):
+    """Универсальный обработчик CORS и ошибок"""
+    origin = request.headers.get('origin')
+    method = request.method
+
+    logger.info(f"📡 {method} {request.url} from {origin}")
+
+    # Обработка OPTIONS запросов
+    if method == "OPTIONS":
+        response = JSONResponse(content={"status": "ok"})
+        response = add_cors_headers(response, origin)
+        logger.info(f"✅ OPTIONS response for {origin}")
+        return response
+
+    try:
+        # Выполняем запрос
+        response = await call_next(request)
+
+        # Добавляем CORS заголовки к успешному ответу
+        response = add_cors_headers(response, origin)
+
+        logger.info(f"✅ {method} {request.url} -> {response.status_code}")
+        return response
+
+    except Exception as e:
+        # Логируем ошибку
+        logger.error(f"❌ Error in {method} {request.url}: {str(e)}")
+        logger.error(traceback.format_exc())
+
+        # Создаем JSON ответ об ошибке
+        error_content = {
+            "error": "Internal Server Error",
+            "detail": str(e) if settings.debug else "An unexpected error occurred",
+            "status_code": 500
+        }
+
+        # Создаем ответ с CORS заголовками
+        error_response = JSONResponse(
+            status_code=500,
+            content=error_content
+        )
+        error_response = add_cors_headers(error_response, origin)
+
+        return error_response
 
 # Создаем директорию для медиа файлов
 os.makedirs(settings.upload_dir, exist_ok=True)
@@ -235,4 +297,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=settings.debug
-    ) 
+    )

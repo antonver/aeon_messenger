@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import exc
 from typing import List
+import logging
 from app.database import get_db
 from app.auth.dependencies import get_current_user
 from app.models import User, Position, Quality, PositionQuality, Interview
@@ -9,6 +11,7 @@ from app.schemas.quality import QualityCreate, Quality as QualitySchema
 from app.schemas.interview import Interview as InterviewSchema, InterviewWithUser
 from app.schemas.user import User as UserSchema
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 def check_admin_permissions(current_user: User = Depends(get_current_user)):
@@ -20,47 +23,20 @@ def check_admin_permissions(current_user: User = Depends(get_current_user)):
         )
     return current_user
 
+# User management endpoints
+
 @router.get("/users", response_model=List[UserSchema])
-async def get_all_users(
+async def get_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(check_admin_permissions)
 ):
-    """Получить всех пользователей (только для админов)"""
-    users = db.query(User).all()
-    return users
-
-@router.post("/users/{user_id}/make-admin")
-async def make_user_admin(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(check_admin_permissions)
-):
-    """Назначить пользователя администратором"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    
-    user.is_admin = True
-    db.commit()
-    return {"message": f"Пользователь {user.first_name} назначен администратором"}
-
-@router.post("/users/{user_id}/remove-admin")
-async def remove_user_admin(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(check_admin_permissions)
-):
-    """Убрать права администратора у пользователя"""
-    if user_id == current_user.id:
-        raise HTTPException(status_code=400, detail="Нельзя убрать права у самого себя")
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    
-    user.is_admin = False
-    db.commit()
-    return {"message": f"Права администратора убраны у пользователя {user.first_name}"}
+    """Получить список всех пользователей"""
+    try:
+        users = db.query(User).all()
+        return users
+    except Exception as e:
+        logger.error(f"Ошибка при получении пользователей: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении пользователей")
 
 @router.post("/users/make-admin-by-username")
 async def make_user_admin_by_username(
@@ -69,15 +45,29 @@ async def make_user_admin_by_username(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Назначить пользователя администратором по username"""
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь с таким username не найден")
-    
-    user.is_admin = True
-    db.commit()
-    return {"message": f"Пользователь @{username} назначен администратором"}
+    try:
+        # Убираем @ если есть
+        username = username.replace('@', '')
 
-# HR System endpoints
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Пользователь с username '{username}' не найден"
+            )
+
+        user.is_admin = True
+        db.commit()
+
+        return {"message": f"Пользователь @{username} успешно назначен администратором"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при назначении администратора: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при назначении администратора")
+
+# Position management endpoints
 
 @router.post("/positions", response_model=PositionSchema)
 async def create_position(
@@ -86,42 +76,50 @@ async def create_position(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Создать новую позицию"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
+        logger.info(f"Создание позиции: {position.dict()}")
+
         # Извлекаем quality_ids из данных позиции
-        quality_ids = position.quality_ids or []
+        quality_ids = getattr(position, 'quality_ids', []) or []
         position_data = position.dict(exclude={'quality_ids'})
-        
-        logger.info(f"Создание позиции: {position_data}")
         
         # Создаем позицию
         db_position = Position(**position_data)
         db.add(db_position)
-        db.commit()
-        db.refresh(db_position)
-        
+        db.flush()  # Получаем ID без коммита
+
         logger.info(f"Позиция создана с ID: {db_position.id}")
         
-        # Временно отключаем добавление качеств из-за ошибки в модели
-        # TODO: Исправить модель PositionQuality
-        # for quality_id in quality_ids:
-        #     quality = db.query(Quality).filter(Quality.id == quality_id).first()
-        #     if quality:
-        #         position_quality = PositionQuality(
-        #             position_id=db_position.id,
-        #             quality_id=quality_id,
-        #             weight=1
-        #         )
-        #         db.add(position_quality)
-        # 
-        # db.commit()
+        # Добавляем качества к позиции
+        for quality_id in quality_ids:
+            # Проверяем, что качество существует
+            quality = db.query(Quality).filter(Quality.id == quality_id).first()
+            if quality:
+                # Проверяем, что связь еще не существует
+                existing = db.query(PositionQuality).filter(
+                    PositionQuality.position_id == db_position.id,
+                    PositionQuality.quality_id == quality_id
+                ).first()
+
+                if not existing:
+                    position_quality = PositionQuality(
+                        position_id=db_position.id,
+                        quality_id=quality_id,
+                        weight=1
+                    )
+                    db.add(position_quality)
+
+        db.commit()
+        db.refresh(db_position)
         return db_position
         
-    except Exception as e:
-        logger.error(f"Ошибка при создании позиции: {e}")
+    except exc.IntegrityError as e:
         db.rollback()
+        logger.error(f"Ошибка целостности данных при создании позиции: {e}")
+        raise HTTPException(status_code=400, detail="Позиция с таким названием уже существует")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при создании позиции: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при создании позиции: {str(e)}")
 
 @router.get("/positions", response_model=List[PositionWithQualities])
@@ -130,8 +128,76 @@ async def get_positions(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Получить все позиции с качествами"""
-    positions = db.query(Position).all()
-    return positions
+    try:
+        positions = db.query(Position).all()
+
+        # Для каждой позиции загружаем связанные качества
+        result = []
+        for position in positions:
+            position_qualities = db.query(PositionQuality).filter(
+                PositionQuality.position_id == position.id
+            ).all()
+
+            qualities = []
+            for pq in position_qualities:
+                quality = db.query(Quality).filter(Quality.id == pq.quality_id).first()
+                if quality:
+                    qualities.append(quality)
+
+            # Создаем объект позиции с качествами
+            position_with_qualities = PositionWithQualities(
+                id=position.id,
+                title=position.title,
+                description=position.description,
+                is_active=position.is_active,
+                created_at=position.created_at,
+                updated_at=position.updated_at,
+                qualities=qualities
+            )
+            result.append(position_with_qualities)
+
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка при получении позиций: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении позиций")
+
+@router.get("/positions/{position_id}", response_model=PositionWithQualities)
+async def get_position(
+    position_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permissions)
+):
+    """Получить позицию по ID с качествами"""
+    try:
+        position = db.query(Position).filter(Position.id == position_id).first()
+        if not position:
+            raise HTTPException(status_code=404, detail="Позиция не найдена")
+
+        # Загружаем связанные качества
+        position_qualities = db.query(PositionQuality).filter(
+            PositionQuality.position_id == position.id
+        ).all()
+
+        qualities = []
+        for pq in position_qualities:
+            quality = db.query(Quality).filter(Quality.id == pq.quality_id).first()
+            if quality:
+                qualities.append(quality)
+
+        return PositionWithQualities(
+            id=position.id,
+            title=position.title,
+            description=position.description,
+            is_active=position.is_active,
+            created_at=position.created_at,
+            updated_at=position.updated_at,
+            qualities=qualities
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при получении позиции: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении позиции")
 
 @router.put("/positions/{position_id}", response_model=PositionSchema)
 async def update_position(
@@ -141,16 +207,40 @@ async def update_position(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Обновить позицию"""
-    db_position = db.query(Position).filter(Position.id == position_id).first()
-    if not db_position:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
-    
-    for field, value in position_update.dict(exclude_unset=True).items():
-        setattr(db_position, field, value)
-    
-    db.commit()
-    db.refresh(db_position)
-    return db_position
+    try:
+        position = db.query(Position).filter(Position.id == position_id).first()
+        if not position:
+            raise HTTPException(status_code=404, detail="Позиция не найдена")
+
+        update_data = position_update.dict(exclude_unset=True, exclude={'quality_ids'})
+        for field, value in update_data.items():
+            setattr(position, field, value)
+
+        # Обновляем качества если они переданы
+        if hasattr(position_update, 'quality_ids') and position_update.quality_ids is not None:
+            # Удаляем старые связи
+            db.query(PositionQuality).filter(PositionQuality.position_id == position_id).delete()
+
+            # Добавляем новые связи
+            for quality_id in position_update.quality_ids:
+                quality = db.query(Quality).filter(Quality.id == quality_id).first()
+                if quality:
+                    position_quality = PositionQuality(
+                        position_id=position_id,
+                        quality_id=quality_id,
+                        weight=1
+                    )
+                    db.add(position_quality)
+
+        db.commit()
+        db.refresh(position)
+        return position
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при обновлении позиции: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при обновлении позиции")
 
 @router.delete("/positions/{position_id}")
 async def delete_position(
@@ -159,13 +249,26 @@ async def delete_position(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Удалить позицию"""
-    db_position = db.query(Position).filter(Position.id == position_id).first()
-    if not db_position:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
-    
-    db.delete(db_position)
-    db.commit()
-    return {"message": "Позиция удалена"}
+    try:
+        position = db.query(Position).filter(Position.id == position_id).first()
+        if not position:
+            raise HTTPException(status_code=404, detail="Позиция не найдена")
+
+        # Сначала удаляем связи с качествами
+        db.query(PositionQuality).filter(PositionQuality.position_id == position_id).delete()
+
+        # Затем удаляем позицию
+        db.delete(position)
+        db.commit()
+        return {"message": "Позиция успешно удалена"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при удалении позиции: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при удалении позиции")
+
+# Quality management endpoints
 
 @router.post("/qualities", response_model=QualitySchema)
 async def create_quality(
@@ -174,9 +277,6 @@ async def create_quality(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Создать новое качество"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
         quality_data = quality.dict()
         logger.info(f"Создание качества: {quality_data}")
@@ -189,9 +289,13 @@ async def create_quality(
         logger.info(f"Качество создано с ID: {db_quality.id}")
         return db_quality
         
-    except Exception as e:
-        logger.error(f"Ошибка при создании качества: {e}")
+    except exc.IntegrityError as e:
         db.rollback()
+        logger.error(f"Ошибка целостности данных при создании качества: {e}")
+        raise HTTPException(status_code=400, detail="Качество с таким названием уже существует")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при создании качества: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при создании качества: {str(e)}")
 
 @router.get("/qualities", response_model=List[QualitySchema])
@@ -200,8 +304,61 @@ async def get_qualities(
     current_user: User = Depends(check_admin_permissions)
 ):
     """Получить все качества"""
-    qualities = db.query(Quality).all()
-    return qualities
+    try:
+        qualities = db.query(Quality).all()
+        return qualities
+    except Exception as e:
+        logger.error(f"Ошибка при получении качеств: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении качеств")
+
+@router.get("/qualities/{quality_id}", response_model=QualitySchema)
+async def get_quality(
+    quality_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permissions)
+):
+    """Получить качество по ID"""
+    quality = db.query(Quality).filter(Quality.id == quality_id).first()
+    if not quality:
+        raise HTTPException(status_code=404, detail="Качество не найдено")
+    return quality
+
+@router.put("/qualities/{quality_id}", response_model=QualitySchema)
+async def update_quality(
+    quality_id: int,
+    quality_update: QualityCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permissions)
+):
+    """Обновить качество"""
+    quality = db.query(Quality).filter(Quality.id == quality_id).first()
+    if not quality:
+        raise HTTPException(status_code=404, detail="Качество не найдено")
+    
+    update_data = quality_update.dict()
+    for field, value in update_data.items():
+        setattr(quality, field, value)
+    
+    db.commit()
+    db.refresh(quality)
+    return quality
+
+@router.delete("/qualities/{quality_id}")
+async def delete_quality(
+    quality_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permissions)
+):
+    """Удалить качество"""
+    quality = db.query(Quality).filter(Quality.id == quality_id).first()
+    if not quality:
+        raise HTTPException(status_code=404, detail="Качество не найдено")
+    
+    db.delete(quality)
+    db.commit()
+    return {"message": "Качество успешно удалено"}
+
+# Position-Quality relationship endpoints
 
 @router.post("/positions/{position_id}/qualities/{quality_id}")
 async def add_quality_to_position(
@@ -219,6 +376,15 @@ async def add_quality_to_position(
     quality = db.query(Quality).filter(Quality.id == quality_id).first()
     if not quality:
         raise HTTPException(status_code=404, detail="Качество не найдено")
+    
+    # Проверяем, не существует ли уже такая связь
+    existing_relation = db.query(PositionQuality).filter(
+        PositionQuality.position_id == position_id,
+        PositionQuality.quality_id == quality_id
+    ).first()
+    
+    if existing_relation:
+        raise HTTPException(status_code=400, detail="Качество уже добавлено к этой позиции")
     
     position_quality = PositionQuality(
         position_id=position_id,
@@ -249,35 +415,25 @@ async def remove_quality_from_position(
     db.commit()
     return {"message": "Качество удалено из позиции"}
 
-@router.get("/interviews", response_model=List[InterviewWithUser])
-async def get_all_interviews(
+# Interview management endpoints
+
+@router.get("/interviews", response_model=List[InterviewSchema])
+async def get_interviews(
     db: Session = Depends(get_db),
     current_user: User = Depends(check_admin_permissions)
 ):
-    """Получить все интервью (только для админов)"""
+    """Получить все интервью"""
     interviews = db.query(Interview).all()
     return interviews
 
-@router.get("/interviews/stats")
-async def get_interview_stats(
+@router.get("/interviews/{interview_id}", response_model=InterviewSchema)
+async def get_interview(
+    interview_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(check_admin_permissions)
 ):
-    """Получить статистику интервью"""
-    total_interviews = db.query(Interview).count()
-    completed_interviews = db.query(Interview).filter(Interview.status == "completed").count()
-    in_progress_interviews = db.query(Interview).filter(Interview.status == "in_progress").count()
-    
-    # Средний балл
-    avg_score = db.query(Interview.score).filter(
-        Interview.status == "completed",
-        Interview.score.isnot(None)
-    ).all()
-    avg_score = sum([score[0] for score in avg_score]) / len(avg_score) if avg_score else 0
-    
-    return {
-        "total_interviews": total_interviews,
-        "completed_interviews": completed_interviews,
-        "in_progress_interviews": in_progress_interviews,
-        "average_score": round(avg_score, 2)
-    } 
+    """Получить интервью по ID"""
+    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Интервью не найдено")
+    return interview

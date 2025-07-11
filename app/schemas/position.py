@@ -36,4 +36,8 @@ class PositionWithQualities(BaseModel):
     qualities: List["Quality"] = []
     
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+# Импортируем Quality после определения PositionWithQualities
+from .quality import Quality
+PositionWithQualities.model_rebuild() 

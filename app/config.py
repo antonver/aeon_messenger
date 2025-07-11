@@ -31,21 +31,33 @@ class Settings(BaseSettings):
     port: int = int(os.getenv("PORT", "8000"))
     host: str = os.getenv("HOST", "0.0.0.0")
     
+    # CORS settings
+    cors_origins: List[str] = []
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Обрабатываем CORS_ORIGINS отдельно
-        cors_env = os.getenv("CORS_ORIGINS", "*")
+
+        # Исправляем URL базы данных для Heroku (postgres:// -> postgresql://)
+        if self.database_url.startswith("postgres://"):
+            object.__setattr__(self, 'database_url', self.database_url.replace("postgres://", "postgresql://", 1))
+
+        # Обрабатываем CORS_ORIGINS
+        cors_env = os.getenv("CORS_ORIGINS", "https://qit-antonvers-projects.vercel.app,https://aeon-messenger.vercel.app")
         if cors_env == "*":
             object.__setattr__(self, 'cors_origins', ["*"])
         else:
-            object.__setattr__(self, 'cors_origins', [origin.strip() for origin in cors_env.split(",")])
-    
+            origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
+            # Добавляем локальные домены для разработки
+            origins.extend([
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173"
+    ])
+            object.__setattr__(self, 'cors_origins', origins)
+
     class Config:
         env_file = ".env"
 
 
 settings = Settings()
-
-# Исправляем URL базы данных для Heroku (postgres:// -> postgresql://)
-if settings.database_url.startswith("postgres://"):
-    settings.database_url = settings.database_url.replace("postgres://", "postgresql://", 1) 
